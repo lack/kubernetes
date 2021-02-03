@@ -18,6 +18,7 @@ package node
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,7 +80,7 @@ func preparePod(name string, node *v1.Node, propagation *v1.MountPropagationMode
 var _ = SIGDescribe("Mount propagation", func() {
 	f := framework.NewDefaultFramework("mount-propagation")
 
-	ginkgo.It("should propagate mounts to the host", func() {
+	ginkgo.It("should propagate mounts within defined scopes", func() {
 		// This test runs two pods: master and slave with respective mount
 		// propagation on common /var/lib/kubelet/XXXX directory. Both mount a
 		// tmpfs to a subdirectory there. We check that these mounts are
@@ -180,15 +181,66 @@ var _ = SIGDescribe("Mount propagation", func() {
 				}
 			}
 		}
-		// Check that the mounts are/are not propagated to the host.
-		// Host can see mount from master
-		cmd = fmt.Sprintf("test `cat %q/master/file` = master", hostDir)
-		err = hostExec.IssueCommand(cmd, node)
-		framework.ExpectNoError(err, "host should see mount from master")
 
-		// Host can't see mount from slave
-		cmd = fmt.Sprintf("test ! -e %q/slave/file", hostDir)
-		err = hostExec.IssueCommand(cmd, node)
-		framework.ExpectNoError(err, "host shouldn't see mount from slave")
+		hiddenPodNames := []string{slave.Name, private.Name, defaultPropagation.Name}
+
+		// Check if the container runtime is in a different mount namespace compared to systemd
+		cmd = "readlink /proc/1/ns/mnt"
+		systemdMountNs, err := hostExec.IssueCommandWithResult(cmd, node)
+		framework.ExpectNoError(err, "Checking systemd mount namespace")
+		cmd = "pidof /usr/bin/kubelet"
+		kubeletPid, err := hostExec.IssueCommandWithResult(cmd, node)
+		framework.ExpectNoError(err, "Checking kubelet pid")
+		kubeletPid = strings.TrimSuffix(kubeletPid, "\n")
+		cmd = fmt.Sprintf("readlink /proc/%s/ns/mnt", kubeletPid)
+		kubeletMountNs, err := hostExec.IssueCommandWithResult(cmd, node)
+		framework.ExpectNoError(err, "Checking kubelet mount namespace")
+		if kubeletMountNs != systemdMountNs {
+			// The container runtime is in a unique mount namespace
+			framework.Logf("Detected container-mount-namespace segregation")
+
+			// Check that none of the pod mounts are propagated to the host.
+			for _, podName := range podNames {
+				cmd := fmt.Sprintf("test ! -e \"%s/%s/file\"", hostDir, podName)
+				err = hostExec.IssueCommand(cmd, node)
+				framework.ExpectNoError(err, "host shouldn't see mount from %s", podName)
+			}
+
+			//enterContainerNamespace := fmt.Sprintf("nsenter --mount=%s", cmNamespace)
+			enterContainerNamespace := fmt.Sprintf("nsenter -t %s -m", kubeletPid)
+
+			// Check that the master and host mounts are propagated to the container-specific mount namespace
+			visibleMountNames := []string{"host", master.Name}
+			for _, mountName := range visibleMountNames {
+				cmd := fmt.Sprintf("%s cat \"%s/%s/file\"", enterContainerNamespace, hostDir, mountName)
+				output, err := hostExec.IssueCommandWithResult(cmd, node)
+				framework.ExpectNoError(err, "host container namespace should see mount from %s: %s", mountName, output)
+				output = strings.TrimSuffix(output, "\n")
+				framework.ExpectEqual(output, mountName, "host container namespace should see mount contents from %s", mountName)
+			}
+
+			// Check that the slave, private, and default mounts are not propagated to the container-specific namespace
+			for _, podName := range hiddenPodNames {
+				cmd := fmt.Sprintf("%s test ! -e \"%s/%s/file\"", enterContainerNamespace, hostDir, podName)
+				output, err := hostExec.IssueCommandWithResult(cmd, node)
+				framework.ExpectNoError(err, "host container namespace shouldn't see mount from %s: %s", podName, output)
+			}
+		} else {
+			// No separate container mount namespace
+			framework.Logf("Detected no container-mount-namespace segregation")
+
+			// Check that the mounts are/are not propagated to the host.
+			// Host can see mount from master
+			cmd := fmt.Sprintf("test `cat %q/master/file` = master", hostDir)
+			err = hostExec.IssueCommand(cmd, node)
+			framework.ExpectNoError(err, "host should see mount from master")
+
+			// Host can't see mount from slave, private, or default pods
+			for _, podName := range hiddenPodNames {
+				cmd := fmt.Sprintf("test ! -e %q/%s/file", hostDir, podName)
+				err = hostExec.IssueCommand(cmd, node)
+				framework.ExpectNoError(err, "host shouldn't see mount from %s", podName)
+			}
+		}
 	})
 })
