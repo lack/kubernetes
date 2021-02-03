@@ -18,6 +18,7 @@ package node
 
 import (
 	"fmt"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -180,15 +181,56 @@ var _ = SIGDescribe("Mount propagation", func() {
 				}
 			}
 		}
-		// Check that the mounts are/are not propagated to the host.
-		// Host can see mount from master
-		cmd = fmt.Sprintf("test `cat %q/master/file` = master", hostDir)
-		err = hostExec.IssueCommand(cmd, node)
-		framework.ExpectNoError(err, "host should see mount from master")
 
-		// Host can't see mount from slave
-		cmd = fmt.Sprintf("test ! -e %q/slave/file", hostDir)
-		err = hostExec.IssueCommand(cmd, node)
-		framework.ExpectNoError(err, "host shouldn't see mount from slave")
+		hiddenPodNames := []string{slave.Name, private.Name, defaultPropagation.Name}
+		cmNamespace := "/run/container-mount-namespace/mnt"
+		namespaceCheckCmd := fmt.Sprintf("test -e %s", cmNamespace)
+		err = hostExec.IssueCommand(namespaceCheckCmd, node)
+		if err == nil {
+			// The container runtime is in a unique mount namespace
+			framework.Logf("Detected container-mount-namespace segregation")
+
+			// Check that none of the pod mounts are propagated to the host.
+			for _, podName := range podNames {
+				cmd := fmt.Sprintf("test ! -e %q/%s/file", hostDir, podName)
+				err = hostExec.IssueCommand(cmd, node)
+				framework.ExpectNoError(err, "host shouldn't see mount from %s", podName)
+			}
+
+			enterContainerNamespace := fmt.Sprintf("nsenter --mount=%s", cmNamespace)
+
+			// Check that the master and host mounts are propagated to the container-specific mount namespace
+			visibleMountNames := []string{"host", master.Name}
+			for _, mountName := range visibleMountNames {
+				cmd := fmt.Sprintf("%s cat \"%s/%s/file\"", enterContainerNamespace, hostDir, mountName)
+				output, err := hostExec.IssueCommandWithResult(cmd, node)
+				framework.ExpectNoError(err, "host container namespace should see mount from %s: %s", mountName, output)
+				output = strings.TrimSuffix(output, "\n")
+				framework.ExpectEqual(output, mountName, "host container namespace should see mount contents from %s", mountName)
+			}
+
+			// Check that the slave, private, and default mounts are not propagated to the container-specific namespace
+			for _, podName := range hiddenPodNames {
+				cmd := fmt.Sprintf("%s test ! -e \"%s/%s/file\"", enterContainerNamespace, hostDir, podName)
+				output, err := hostExec.IssueCommandWithResult(cmd, node)
+				framework.ExpectNoError(err, "host container namespace shouldn't see mount from %s: %s", podName, output)
+			}
+		} else {
+			// No separate container mount namespace
+			framework.Logf("Detected no container-mount-namespace segregation")
+
+			// Check that the mounts are/are not propagated to the host.
+			// Host can see mount from master
+			cmd := fmt.Sprintf("test `cat %q/master/file` = master", hostDir)
+			err = hostExec.IssueCommand(cmd, node)
+			framework.ExpectNoError(err, "host should see mount from master")
+
+			// Host can't see mount from slave, private, or default pods
+			for _, podName := range hiddenPodNames {
+				cmd := fmt.Sprintf("test ! -e %q/%s/file", hostDir, podName)
+				err = hostExec.IssueCommand(cmd, node)
+				framework.ExpectNoError(err, "host shouldn't see mount from %s", podName)
+			}
+		}
 	})
 })
