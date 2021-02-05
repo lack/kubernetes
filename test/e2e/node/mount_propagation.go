@@ -183,21 +183,31 @@ var _ = SIGDescribe("Mount propagation", func() {
 		}
 
 		hiddenPodNames := []string{slave.Name, private.Name, defaultPropagation.Name}
-		cmNamespace := "/run/container-mount-namespace/mnt"
-		namespaceCheckCmd := fmt.Sprintf("test -e %s", cmNamespace)
-		err = hostExec.IssueCommand(namespaceCheckCmd, node)
-		if err == nil {
+
+		// Check if the container runtime is in a different mount namespace compared to systemd
+		cmd = "readlink /proc/1/ns/mnt"
+		systemdMountNs, err := hostExec.IssueCommandWithResult(cmd, node)
+		framework.ExpectNoError(err, "Checking systemd mount namespace")
+		cmd = "pidof /usr/bin/kubelet"
+		kubeletPid, err := hostExec.IssueCommandWithResult(cmd, node)
+		framework.ExpectNoError(err, "Checking kubelet pid")
+		kubeletPid = strings.TrimSuffix(kubeletPid, "\n")
+		cmd = fmt.Sprintf("readlink /proc/%s/ns/mnt", kubeletPid)
+		kubeletMountNs, err := hostExec.IssueCommandWithResult(cmd, node)
+		framework.ExpectNoError(err, "Checking kubelet mount namespace")
+		if kubeletMountNs != systemdMountNs {
 			// The container runtime is in a unique mount namespace
 			framework.Logf("Detected container-mount-namespace segregation")
 
 			// Check that none of the pod mounts are propagated to the host.
 			for _, podName := range podNames {
-				cmd := fmt.Sprintf("test ! -e %q/%s/file", hostDir, podName)
+				cmd := fmt.Sprintf("test ! -e \"%s/%s/file\"", hostDir, podName)
 				err = hostExec.IssueCommand(cmd, node)
 				framework.ExpectNoError(err, "host shouldn't see mount from %s", podName)
 			}
 
-			enterContainerNamespace := fmt.Sprintf("nsenter --mount=%s", cmNamespace)
+			//enterContainerNamespace := fmt.Sprintf("nsenter --mount=%s", cmNamespace)
+			enterContainerNamespace := fmt.Sprintf("nsenter -t %s -m", kubeletPid)
 
 			// Check that the master and host mounts are propagated to the container-specific mount namespace
 			visibleMountNames := []string{"host", master.Name}
