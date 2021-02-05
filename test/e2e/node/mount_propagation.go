@@ -80,7 +80,7 @@ func preparePod(name string, node *v1.Node, propagation *v1.MountPropagationMode
 var _ = SIGDescribe("Mount propagation", func() {
 	f := framework.NewDefaultFramework("mount-propagation")
 
-	ginkgo.It("should propagate mounts to the host", func() {
+	ginkgo.It("should propagate mounts within defined scopes", func() {
 		// This test runs two pods: master and slave with respective mount
 		// propagation on common /var/lib/kubelet/XXXX directory. Both mount a
 		// tmpfs to a subdirectory there. We check that these mounts are
