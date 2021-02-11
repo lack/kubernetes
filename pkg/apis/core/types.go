@@ -1793,22 +1793,23 @@ type VolumeMount struct {
 type MountPropagationMode string
 
 const (
-	// MountPropagationNone means that the volume in a container will
-	// not receive new mounts from the host or other containers, and filesystems
-	// mounted inside the container won't be propagated to the host or other
-	// containers.
+	// MountPropagationNone means that the volume in a container will not
+	// receive new mounts from the host, container runtime, or other
+	// containers, and filesystems mounted inside the container won't be
+	// propagated to the host, container runtime, or other containers.
 	// Note that this mode corresponds to "private" in Linux terminology.
 	MountPropagationNone MountPropagationMode = "None"
-	// MountPropagationHostToContainer means that the volume in a container will
-	// receive new mounts from the host or other containers, but filesystems
-	// mounted inside the container won't be propagated to the host or other
-	// containers.
+	// MountPropagationHostToContainer means that the volume in a container
+	// will receive new mounts from the host, container runtime, or other
+	// containers, but filesystems mounted inside the container won't be
+	// propagated to the host, container runtime, or other containers.
 	// Note that this mode is recursively applied to all mounts in the volume
 	// ("rslave" in Linux terminology).
 	MountPropagationHostToContainer MountPropagationMode = "HostToContainer"
-	// MountPropagationBidirectional means that the volume in a container will
-	// receive new mounts from the host or other containers, and its own mounts
-	// will be propagated from the container to the host or other containers.
+	// MountPropagationBidirectional means that the volume in a container
+	// will receive new mounts from the host, container runtime, or other
+	// containers, and its own mounts will be propagated from the container
+	// to the container runtime or other containers, but not the host.
 	// Note that this mode is recursively applied to all mounts in the volume
 	// ("rshared" in Linux terminology).
 	MountPropagationBidirectional MountPropagationMode = "Bidirectional"
