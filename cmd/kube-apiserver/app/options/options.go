@@ -94,6 +94,8 @@ type ServerRunOptions struct {
 	ShowHiddenMetricsForVersion string
 
 	OpenShiftConfig string
+
+	PprofPort uint
 }
 
 // NewServerRunOptions creates a new ServerRunOptions object with default parameters
@@ -137,6 +139,7 @@ func NewServerRunOptions() *ServerRunOptions {
 			HTTPTimeout: time.Duration(5) * time.Second,
 		},
 		ServiceNodePortRange: kubeoptions.DefaultServiceNodePortRange,
+		PprofPort:            6060,
 	}
 
 	// Overwrite the default for storage data format.
@@ -287,6 +290,9 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
 	fs.StringVar(&s.OpenShiftConfig, "openshift-config", s.OpenShiftConfig, "config for openshift")
 	fs.MarkDeprecated("openshift-config", "to be removed")
 	fs.MarkHidden("openshift-config")
+
+	fs.UintVar(&s.PprofPort, "pprof-port", s.PprofPort,
+		"A port to bind the pprof HTTP server")
 
 	return fss
 }

@@ -35,6 +35,8 @@ import (
 	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
 	"k8s.io/kubernetes/openshift-kube-apiserver/openshiftkubeapiserver"
 
+	_ "net/http/pprof"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -218,6 +220,10 @@ cluster's shared state through which all other components interact.`,
 func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) error {
 	// To help debugging, immediately log version
 	klog.Infof("Version: %+v", version.Get())
+
+	if completeOptions.PprofPort > 0 {
+		klog.Info(http.ListenAndServe(fmt.Sprintf("localhost:%d", completeOptions.PprofPort), nil))
+	}
 
 	server, err := CreateServerChain(completeOptions, stopCh)
 	if err != nil {
